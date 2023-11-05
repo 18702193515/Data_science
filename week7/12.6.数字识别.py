@@ -167,6 +167,4 @@ plt.xlabel('number of training examples seen')
 plt.ylabel('negative log likelihood loss')
 plt.show()
  
- # 保存模型
-torch.save(network.state_dict(), 'model.pth')
  
