@@ -6,11 +6,9 @@ import numpy as np
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 
-# 加载Cora数据集
 dataset = Planetoid(root='./cora', name='Cora')
 data = dataset[0]
 
-# 定义图卷积网络模型
 class GCN(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels):
         super(GCN, self).__init__()
@@ -24,14 +22,11 @@ class GCN(torch.nn.Module):
         x = self.conv2(x, edge_index)
         return F.log_softmax(x, dim=1)
 
-# 创建GCN模型实例
 model = GCN(dataset.num_features, 16, dataset.num_classes)
 
-# 定义优化器和损失函数
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 criterion = torch.nn.NLLLoss()
 
-# 训练模型
 def train():
     model.train()
     optimizer.zero_grad()
@@ -40,7 +35,6 @@ def train():
     loss.backward()
     optimizer.step()
 
-# 测试模型
 def test():
     model.eval()
     out = model(data.x, data.edge_index)
@@ -49,20 +43,17 @@ def test():
     acc = int(correct.sum()) / int(data.test_mask.sum())
     return acc
 
-# 进行多轮训练和测试
-for epoch in range(200):
+for epoch in range(100):
     train()
     acc = test()
     print(f'Epoch: {epoch+1}, Test Accuracy: {acc:.4f}')
 
-# 使用PCA进行降维
 features = data.x.detach().numpy()
 labels = data.y.detach().numpy()
 
 pca = PCA(n_components=2)
 features_2d = pca.fit_transform(features)
 
-# 可视化展示
 plt.scatter(features_2d[:, 0], features_2d[:, 1], c=labels, cmap='viridis')
 plt.title('PCA Visualization of Cora Dataset')
 plt.xlabel('PC1')
