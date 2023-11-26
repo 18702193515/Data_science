@@ -305,3 +305,95 @@ print(f"Loss: {loss}, Accuracy: {accuracy}")
 
 
 ![image-20231029140908340](image-20231029140908340.png)
+
+
+
+#### 手写汉字识别
+
+​	这个代码是我在github上找到的，并且难得的是经过我对代码的修改，总算能在cuda、cudnn、tensorflow版本都合适的情况下运行（我先前试过的三四个project在linux虚拟机跑、非虚拟环境跑都不成功）。我会对其进行适当解读。
+
+首先看模型：
+
+​	该模型采用了经典的卷积神经网络架构，包含多个卷积层和池化层。这种架构在图像分类任务中表现良好。
+
+```python
+def GetModel_V1(input_shape, class_num, is_training=True):
+    input_ = tf.keras.Input(shape=input_shape) #输入层：接受输入数据的形状为 input_shape 的张量。
+
+    #卷积层 1：使用 7x7 的卷积核，步长为 2，在填充方式上采用了 "SAME"，并使用 ReLU 激活函数。输出结果形状为 (None, H/2, W/2, 64)，其中 H 和 W 分别表示输入数据的高度和宽度。
+    conv1 = tf.keras.layers.Conv2D(64, 7, 2, 'SAME', activation='relu')(input_)
+    #池化层 1：采用默认参数的最大池化操作，对卷积层 1 的输出进行下采样，输出结果形状为 (None, H/4, W/4, 64)。
+    pool1 = tf.keras.layers.MaxPooling2D()(conv1)
+    #卷积层 2：使用 3x3 的卷积核，步长为 2，在填充方式上采用了 "SAME"，并使用 ReLU 激活函数。输出结果形状为 (None, H/8, W/8, 256)。
+    conv2 = tf.keras.layers.Conv2D(256, 3, 2, 'SAME', activation='relu')(pool1)
+    #池化层 2：采用默认参数的最大池化操作，对卷积层 2 的输出进行下采样，输出结果形状为 (None, H/16, W/16, 256)。
+    pool2 = tf.keras.layers.MaxPooling2D()(conv2)
+    #卷积层 3：使用 3x3 的卷积核，步长为 2，在填充方式上采用了 "SAME"，并使用 ReLU 激活函数。输出结果形状为 (None, H/32, W/32, 512)。
+    conv3 = tf.keras.layers.Conv2D(512, 3, 2, 'SAME', activation='relu')(pool2)
+    #池化层 3：采用默认参数的平均池化操作，对卷积层 3 的输出进行下采样，输出结果形状为 (None, H/32, W/32, 512)。
+    pool3 = tf.keras.layers.AveragePooling2D()(conv3)
+
+    #展平层：将池化层 3 的输出结果展平为形状为 (None, H/32 * W/32 * 512) 的向量。
+    flat = tf.keras.layers.Flatten()(pool3)
+    #全连接层：使用 softmax 激活函数，将展平层的输出映射到长度为 class_num 的向量，表示不同类别的概率分布。
+    output = tf.keras.layers.Dense(class_num, activation='softmax')(flat)
+
+    model = tf.keras.Model(inputs=input_, outputs=output)
+    model.summary()  # 将模型信息输出到终端
+    return model
+```
+
+
+
+然后就是训练的部分：
+
+```python
+from config import *
+import tensorflow as tf
+import tfrecord_loader
+import model
+import func
+import numpy as np
+import os
+
+isTraining = True
+train_dataset_path = 'TFRecord'
+
+train_dataset = tfrecord_loader.GetDataset(train_dataset_path)
+w2i, i2w = func.get_w2i_dict()
+
+print(tf.config.list_logical_devices('GPU'))
+
+MyMod = model.GetModel_V1((resize_scale, resize_scale, 1), len(w2i), isTraining)  # 获取模型
+optimizer = tf.keras.optimizers.RMSprop()  # 定义优化器
+
+# if os.path.exists(weight_path):
+#     MyMod.load_weights(weight_path)  # 加载权重
+
+@tf.function() #使用 @tf.function() 装饰器将 train() 函数转换为 TensorFlow 计算图。
+def train(datas, labels):  # 训练函数
+    with tf.GradientTape() as Tape:  # 自动记录梯度
+        output = MyMod(datas)  # 前向传播
+        losses = tf.reduce_mean(tf.keras.losses.sparse_categorical_crossentropy(labels, output))  # 计算 loss
+    grad = Tape.gradient(losses, MyMod.trainable_variables)  # 获取梯度
+    optimizer.apply_gradients(zip(grad, MyMod.trainable_variables))  # 传播梯度
+    return losses  # 返回 loss 值
+
+if isTraining:
+    try:
+        for eps in range(epochs):
+            for i, (datas, labels) in enumerate(train_dataset):
+                if i % 10000 == 0:  # 10000 次 保存一下权重
+                    MyMod.save_weights(weight_path)
+                loss = train(datas, labels)
+                if i % 200 == 0:  # 200次输出一下loss和这一轮的准确率
+                    y_pred = MyMod(datas)
+                    acc = tf.reduce_sum(tf.cast(tf.equal(labels, tf.argmax(y_pred, 1)), tf.float64)) / len(labels)
+                    print('epoch: %d, step: %d, loss:%.2f, acc = %.2f%%' % (eps, i, loss.numpy(), acc.numpy() * 100))
+    except KeyboardInterrupt:
+        MyMod.save_weights(weight_path)  # Ctrl + C 时保存模型
+```
+
+​	这个模型跑下来是有可能不收敛的，但是只出现过一次，不排除是环境问题。准确率最后能达到85%左右。不过这个模型比较大，数据比较大（疯狂占用内存，IO频繁，gpu占用倒是不高），我的4060ti 16g似乎都得跑十分钟以上。（建议以后的课就数字识别，不知道没有独显的同学怎么实现的这个project，毕竟数据集比较大，租服务器应该也不是很方便）
+
+![image-20231126222440627](image-20231126222440627.png)
